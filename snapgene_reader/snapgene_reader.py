@@ -1,6 +1,7 @@
 import struct
 import xmltodict
 import os
+import time
 
 from Bio.Seq import Seq
 from Bio.SeqRecord import SeqRecord
@@ -84,7 +85,7 @@ def snapgene_file_to_dict(filepath=None, fileobject=None):
     while True:
         # READ THE WHOLE FILE, BLOCK BY BLOCK, UNTIL THE END
         next_byte = fileobject.read(1)
-        
+
         # next_byte table
         # 0: dna sequence
         # 1: compressed DNA
@@ -193,9 +194,9 @@ def snapgene_file_to_dict(filepath=None, fileobject=None):
         else:
             # WE IGNORE THE WHOLE BLOCK
             # fileobject.read(block_size)
-            # 2: 
+            # 2:
             # 3:
-            
+
             block = fileobject.read(block_size)
             print(ord(next_byte), len(block))
             # data['block_{}'.format(ord(next_byte))] = block
@@ -238,9 +239,16 @@ def snapgene_file_to_seqrecord(filepath=None, fileobject=None):
 def snapgene_file_to_gbk(read_file_object, write_file_object):
     data = snapgene_file_to_dict(fileobject = read_file_object)
     with open('dst.json', 'w') as jf:
-        jf.write(json.dumps(data,indent=4))
+        jf.write(json.dumps(data, indent=4))
     w = write_file_object
-    w.write('LOCUS       Exported                7235 bp ds-DNA     {} SYN 15-APR-2012\n'.format(data['dna']['topology']))
+    if data["isDNA"]:
+        sequence_type = "DNA"
+    else:
+        sequence_type = "RNA"
+    w.write('LOCUS       Exported                {} bp {}s-{}     {} SYN {}\n'\
+            .format(gs(data, 'dna', 'length'), data['dna']['strandedness'][0],
+                    sequence_type,
+                    data['dna']['topology'], time.strftime("%d-%b-%Y", time.localtime()).upper()))
     definition = gs(data, 'notes','Description', default='.').replace('\n', '\n            ')
     w.write('DEFINITION  {}\n'.format(definition))
     w.write('ACCESSION   .\n')
@@ -248,7 +256,7 @@ def snapgene_file_to_gbk(read_file_object, write_file_object):
     w.write('KEYWORDS    {}\n'.format(gs(data, 'notes','CustomMapLabel', default='.')))
     w.write('SOURCE      .\n')
     w.write('  ORGANISM  .\n')
-    
+
     references = gs(data, 'notes', 'References')
 
     reference_count = 0

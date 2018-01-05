@@ -1,5 +1,5 @@
 # -*- coding:utf-8 -*-
-from snapgene_reader import snapgene_file_to_seqrecord, snapgene_file_to_gbk
+from snapgene_reader import snapgene_file_to_seqrecord, snapgene_file_to_gbk, snapgene_file_to_dict
 from Bio import SeqIO
 import os
 import sys
@@ -29,6 +29,10 @@ def test_convert_gbk(tmpdir):
         outfpath = os.path.join(tmpdir, fname)
         write_file_object = open(outfpath + ".gbk", "w")
         snapgene_file_to_gbk(read_file_object, write_file_object)
+        read_file_object = open(infpath)
+        data = snapgene_file_to_dict(fileobject=read_file_object)
+        for key in data:
+            print key, data[key]
 
 
 if __name__ == '__main__':
