@@ -2,6 +2,7 @@ import struct
 import xmltodict
 import os
 import time
+import textwrap
 
 from Bio.Seq import Seq
 from Bio.SeqRecord import SeqRecord
@@ -18,6 +19,21 @@ html_parser.ignore_emphasis = True
 html_parser.ignore_links = True
 html_parser.body_width = 0
 html_parser.single_line_break = True
+
+
+def wrap_text(text, leading_space):
+    wrapper = textwrap.TextWrapper()
+    wrapper.width = 80
+    wrapper.subsequent_indent = " " * leading_space
+    text = text.rstrip("\n")
+    text_lines = text.split("\n")
+    new_text = ""
+    new_text += wrapper.fill(text_lines[0]).rstrip("\n") + "\n"
+    wrapper.initial_indent = " " * leading_space
+    for text_line in text_lines[1:]:
+        new_text += wrapper.fill(text_line).rstrip("\n") + "\n"
+    return new_text
+
 
 def parse(val):
     t = html_parser.handle(val).strip() if isinstance(val, str) else val
@@ -47,7 +63,29 @@ def gs(dic, *args, **kwargs):
             d = d[a]
         else:
             return kwargs['default']
+    if isinstance(d, str) or isinstance(d, unicode):
+        d = strip_html(d)
+    elif isinstance(d, list):
+        for i, element in enumerate(d):
+            if isinstance(element, str) or isinstance(element, unicode):
+                d[i] = strip_html(element)
     return d
+
+def strip_html(text):
+    pat = re.compile("<html>(.+?)</html>", re.S)
+    text = pat.sub("\g<1>", text)
+    pat = re.compile("<body>(.+?)</body>", re.S)
+    text = pat.sub("\g<1>", text)
+    pat = re.compile("<div>(.+?)</div>", re.S)
+    text = pat.sub("\g<1>\n", text)
+    pat = re.compile("<b>(.+?)</b>", re.S)
+    text = pat.sub("\g<1>", text)
+    pat = re.compile("<i>(.+?)</i>", re.S)
+    text = pat.sub("\g<1>", text)
+    text = re.sub("<br>", "\n", text)
+    text = re.sub("&nbsp;", " ", text)
+    text = re.sub("\n{2,}", "\n\n", text)
+    return text
 
 def snapgene_file_to_dict(filepath=None, fileobject=None):
     """Return a dictionnary containing the data from a ``*.dna`` file.
@@ -237,23 +275,25 @@ def snapgene_file_to_seqrecord(filepath=None, fileobject=None):
     )
 
 def snapgene_file_to_gbk(read_file_object, write_file_object):
-    data = snapgene_file_to_dict(fileobject = read_file_object)
+    data = snapgene_file_to_dict(fileobject=read_file_object)
     with open('dst.json', 'w') as jf:
         jf.write(json.dumps(data, indent=4))
     w = write_file_object
     if data["isDNA"]:
+        sequence_unit = "bp"
         sequence_type = "DNA"
     else:
-        sequence_type = "RNA"
-    w.write('LOCUS       Exported                {} bp {}s-{}     {} SYN {}\n'\
-            .format(gs(data, 'dna', 'length'), data['dna']['strandedness'][0],
-                    sequence_type,
+        sequence_unit = "aa"
+        sequence_type = ""
+    w.write('LOCUS       Exported                {} {} {}s-{}     {} SYN {}\n'\
+            .format(gs(data, 'dna', 'length'), sequence_unit,
+                    data['dna']['strandedness'][0], sequence_type,
                     data['dna']['topology'], time.strftime("%d-%b-%Y", time.localtime()).upper()))
-    definition = gs(data, 'notes','Description', default='.').replace('\n', '\n            ')
-    w.write('DEFINITION  {}\n'.format(definition))
+    definition = gs(data, 'notes', 'Description', default='.').replace('\n', '\n            ')
+    w.write(wrap_text('DEFINITION  {}\n'.format(definition), 12))
     w.write('ACCESSION   .\n')
     w.write('VERSION     .\n')
-    w.write('KEYWORDS    {}\n'.format(gs(data, 'notes','CustomMapLabel', default='.')))
+    w.write(wrap_text('KEYWORDS    {}\n'.format(gs(data, 'notes', 'CustomMapLabel', default='.')), 12))
     w.write('SOURCE      .\n')
     w.write('  ORGANISM  .\n')
 
@@ -266,17 +306,17 @@ def snapgene_file_to_gbk(read_file_object, write_file_object):
             ref = references[key]
             w.write('REFERENCE   {}  (bases 1 to {} )\n'.format(reference_count, gs(data, 'dna', 'length')))
             for key2 in ref:
-                gb_key = key2.replace('@','').upper()
-                w.write('  {}   {}\n'.format(gb_key, ref[key2]))
+                gb_key = key2.replace('@', '').upper()
+                w.write('  {:10}{}\n'.format(gb_key, strip_html(ref[key2])))
 
     # generate special reference
     reference_count += 1
     w.write('REFERENCE   {}  (bases 1 to {} )\n'.format(reference_count, gs(data, 'dna', 'length')))
-    w.write('  AUTHORS   IssacLuo\'s SnapGeneReader\n')
+    w.write('  AUTHORS   SnapGeneReader\n')
     w.write('  TITLE     Direct Submission\n')
-    w.write('  JOURNAL   Exported Monday, Nov 20, 2017 from SnapGene File Reader\n            https://github.com/IsaacLuo/SnapGeneFileReader\n')
-
-    w.write('COMMENT     {}\n'.format(gs(data, 'notes', 'Comments', default='.').replace('\n', '\n            ').replace('\\','')))
+    w.write('  JOURNAL   Exported from SnapGene File Reader\n')
+    w.write(wrap_text('COMMENT     {}\n'.format(gs(data, 'notes', 'Comments', default='.'). \
+                       replace('\\', '')), 12))
     w.write('FEATURES             Location/Qualifiers\n')
 
     features = gs(data, 'features')
@@ -300,22 +340,22 @@ def snapgene_file_to_gbk(read_file_object, write_file_object):
             )
 
         if strand == '-':
-            w.write('     {} complement({})\n'.format(
+            w.write(wrap_text('     {} complement({})\n'.format(
                 gs(feature, 'type', default=' ').ljust(15),
                 line,
-            ))
+                ), 21))
         else:
-            w.write('     {} {}\n'.format(
+            w.write(wrap_text('     {} {}\n'.format(
                 gs(feature, 'type', default=' ').ljust(15),
                 line,
-                ))
+                ), 21))
         strand = gs(feature, 'strand', default='')
         # if strand == '-':
         #     w.write('                     /direction=LEFT\n')
         # name
-        w.write('                     /note="{}"\n'.format(
-            gs(feature, 'name', default='feature')
-        ))
+        w.write(wrap_text('                     /label="{}"\n'.format(
+            gs(feature, 'name', default='.')
+        ), 21))
         # qualifiers
         for q_key in gs(feature, 'qualifiers', default={}):
             # do not write label, because it has been written at first.
@@ -325,35 +365,39 @@ def snapgene_file_to_gbk(read_file_object, write_file_object):
                 for note in gs(feature, 'qualifiers', q_key, default=[]):
                     # do note write color, because it will be written later
                     if note[:6] != 'color:':
-                        w.write('                     /note="{}"\n'.format(note))
+                        w.write(wrap_text('                     /note="{}"\n'.format(note), 21))
+            elif q_key == 'direction':
+                # do not write direction
+                pass
             else:
-                w.write('                     /{}="{}"\n'.format(
+                w.write(wrap_text('                     /{}="{}"\n'.format(
                     q_key, gs(feature, 'qualifiers', q_key, default='')
-                ))
-        if len(segments) > 1:
-            w.write('                     /note="This feature has {} segments:'.format(len(segments)))
-            for seg_i in range(len(segments)):
-                segment_name = gs(segments[seg_i], '@name', default='')
-                if segment_name:
-                    segment_name = ' / {}'.format(segment_name)
-                w.write('\n                        {}:  {} / {}{}'.format(
-                        seg_i,
-                        segments[seg_i]['@range'].replace('-',' .. '),
-                        segments[seg_i]['@color'],
-                        segment_name,
-                    )
-                )
-            w.write('"\n')
-        else:
-            # write colors and direction
-            w.write('                     /note="color: {}'.format(gs(feature, 'color', default='#ffffff')))
-            if strand == '-':
-                w.write('; direction: LEFT"\n')
-                # w.write('"\n')
-            elif strand == '+':
-                w.write('; direction: RIGHT"\n')
-            else:
-                w.write('"\n')
+                ), 21))
+        # if len(segments) > 1:
+        #     w.write('                     /note="This feature has {} segments:'.format(len(segments)))
+        #     for seg_i in range(len(segments)):
+        #         segment_name = gs(segments[seg_i], '@name', default='')
+        #         if segment_name:
+        #             segment_name = ' / {}'.format(segment_name)
+        #         w.write('\n                        {}:  {} / {}{}'.format(
+        #                 seg_i,
+        #                 segments[seg_i]['@range'].replace('-',' .. '),
+        #                 segments[seg_i]['@color'],
+        #                 segment_name,
+        #             )
+        #         )
+        #     w.write('"\n')
+        # else:
+        #     pass
+        #     write colors and direction
+        #     w.write('                     /note="color: {}'.format(gs(feature, 'color', default='#ffffff')))
+        #     if strand == '-':
+        #         w.write('; direction: LEFT"\n')
+        #         # w.write('"\n')
+        #     elif strand == '+':
+        #         w.write('; direction: RIGHT"\n')
+        #     else:
+        #         w.write('"\n')
 
     # sequence
     w.write('ORIGIN\n')
