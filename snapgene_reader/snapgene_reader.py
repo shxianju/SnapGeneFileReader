@@ -320,19 +320,30 @@ def snapgene_file_to_gbk(read_file_object, write_file_object):
     w.write('FEATURES             Location/Qualifiers\n')
 
     features = gs(data, 'features')
+    features = sorted(features, key=lambda x: gs(x, "start", default=9999999))
     for feature in features:
         strand = gs(feature, 'strand', default='')
-
-        segments =  gs(feature, 'segments', default=[])
+        segments = gs(feature, 'segments', default=[])
         segments = [x for x in segments if x['@type'] == 'standard']
         if len(segments) > 1:
             line = 'join('
+            seg_positions = []
             for segment in segments:
                 segment_range = gs(segment, '@range').replace('-','..')
+                seg_match = re.search(r"^(\d+)\.\.(\d+)$", segment_range)
+                if seg_match:
+                    seg_positions.append((int(seg_match.group(1)), int(seg_match.group(2))))
                 if gs(segment, '@type') == 'standard':
                     line += segment_range
                     line += ','
             line = line[:-1] + ')'
+            countinous_flag = True
+            for i in range(len(seg_positions) - 1):
+                if seg_positions[i][1] + 1 != seg_positions[i+1][0]:
+                    countinous_flag = False
+            if countinous_flag:
+                line = '{}..{}'.format(seg_positions[0][0], seg_positions[-1][1])
+
         else:
             line = '{}..{}'.format(
                 gs(feature, 'start', default=' '),
@@ -356,12 +367,13 @@ def snapgene_file_to_gbk(read_file_object, write_file_object):
         w.write(wrap_text('                     /label="{}"\n'.format(
             gs(feature, 'name', default='.')
         ), 21))
+        written_name = gs(feature, 'name', default='.')
         # qualifiers
         for q_key in gs(feature, 'qualifiers', default={}):
             # do not write label, because it has been written at first.
-            if q_key == 'label':
-                pass
-            elif q_key == 'note':
+            # if q_key == 'label':
+            #     pass
+            if q_key == 'note':
                 for note in gs(feature, 'qualifiers', q_key, default=[]):
                     # do note write color, because it will be written later
                     if note[:6] != 'color:':
@@ -369,10 +381,30 @@ def snapgene_file_to_gbk(read_file_object, write_file_object):
             elif q_key == 'direction':
                 # do not write direction
                 pass
+            elif q_key == 'label':
+                # write the label if there are multiple 'label' qualifiers
+                labels = gs(feature, 'qualifiers', q_key, default=[])
+                if isinstance(labels, list):
+                    for label in labels:
+                        if label != written_name:
+                            #do not write name again
+                            w.write(wrap_text('                     /{}="{}"\n'.format(
+                                    q_key, label), 21))
+                else:
+                    pass
             else:
-                w.write(wrap_text('                     /{}="{}"\n'.format(
-                    q_key, gs(feature, 'qualifiers', q_key, default='')
-                ), 21))
+                quals = gs(feature, 'qualifiers', q_key, default='')
+                if isinstance(quals, list):
+                    for qual in quals:
+                        if q_key == "translation":
+                            qual = re.sub(r",", "", qual)
+                        w.write(wrap_text('                     /{}="{}"\n'.format(
+                                q_key, qual), 21))
+                else:
+                    if q_key == "translation":
+                        quals = re.sub(r",", "", quals)
+                    w.write(wrap_text('                     /{}="{}"\n'.format(
+                            q_key, quals), 21))
         # if len(segments) > 1:
         #     w.write('                     /note="This feature has {} segments:'.format(len(segments)))
         #     for seg_i in range(len(segments)):
@@ -404,7 +436,7 @@ def snapgene_file_to_gbk(read_file_object, write_file_object):
     seq = gs(data, 'seq')
     # devide rows
     for i in range(0, len(seq), 60):
-        w.write(str(i).rjust(9))
+        w.write(str(i+1).rjust(9))
         for j in range(i, min(i+60, len(seq)), 10):
             w.write(' {}'.format(seq[j:j+10]))
         w.write('\n')
